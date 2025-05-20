@@ -1,6 +1,0 @@
-git init
-git add .
-git commit -m "Added project files"
-git branch -M main
-git remote add origin <https://github.com/UzairImran1>
-git push -u origin main
