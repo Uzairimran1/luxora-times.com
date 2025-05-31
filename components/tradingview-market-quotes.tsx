@@ -6,19 +6,19 @@ import { Loader2, Maximize2, Minimize2, RefreshCw, AlertTriangle } from "lucide-
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 
-interface TradingViewAdvancedChartProps {
+interface TradingViewMarketQuotesProps {
   height?: string
-  symbol?: string
+  width?: string
   allowFullscreen?: boolean
   className?: string
 }
 
-export default function TradingViewAdvancedChart({
-  height = "600px",
-  symbol = "NASDAQ:AAPL",
+export default function TradingViewMarketQuotes({
+  height = "550px",
+  width = "100%",
   allowFullscreen = true,
   className = "",
-}: TradingViewAdvancedChartProps) {
+}: TradingViewMarketQuotesProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const scriptRef = useRef<HTMLScriptElement | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -77,8 +77,8 @@ export default function TradingViewAdvancedChart({
     if (!widgetDiv) {
       widgetDiv = document.createElement("div")
       widgetDiv.className = "tradingview-widget-container__widget"
-      widgetDiv.style.height = "calc(100% - 32px)"
       widgetDiv.style.width = "100%"
+      widgetDiv.style.height = "100%"
       container.appendChild(widgetDiv)
     }
 
@@ -86,42 +86,80 @@ export default function TradingViewAdvancedChart({
     const script = document.createElement("script")
     script.type = "text/javascript"
     script.async = true
-    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js"
+    script.src = "https://s3.tradingview.com/external-embedding/embed-widget-market-quotes.js"
 
-    // Add error handling
     script.onerror = () => {
-      console.error("Failed to load TradingView script")
-      setError("Failed to load chart. Please check your internet connection.")
+      console.error("Failed to load TradingView market quotes script")
+      setError("Failed to load market quotes. Please check your internet connection.")
       setIsLoading(false)
     }
 
     script.onload = () => {
-      // Add a small delay to allow the widget to initialize
       setTimeout(() => {
         setIsLoading(false)
       }, 2000)
     }
 
-    // Set script content
-    script.innerHTML = JSON.stringify({
-      autosize: true,
-      symbol: symbol,
-      interval: "D",
-      timezone: "Etc/UTC",
-      theme: "dark",
-      style: "1",
-      locale: "en",
-      allow_symbol_change: true,
-      hide_side_toolbar: window.innerWidth < 768, // Hide on mobile
-      withdateranges: true,
-      support_host: "https://www.tradingview.com",
-      container_id: widgetDiv.id || `tradingview_${Date.now()}`,
-    })
+    // Responsive width and height
+    const isMobile = window.innerWidth < 768
+    const dynamicWidth = isMobile ? "100%" : width
+    const dynamicHeight = isMobile ? 400 : Number.parseInt(height)
 
-    // Assign unique ID if not present
-    if (!widgetDiv.id) {
-      widgetDiv.id = `tradingview_${Date.now()}`
-    }
+    script.innerHTML = JSON.stringify({
+      width: dynamicWidth,
+      height: dynamicHeight,
+      symbolsGroups: [
+        {
+          name: "Indices",
+          originalName: "Indices",
+          symbols: [
+            { name: "FOREXCOM:SPXUSD", displayName: "S&P 500 Index" },
+            { name: "FOREXCOM:NSXUSD", displayName: "US 100 Cash CFD" },
+            { name: "FOREXCOM:DJI", displayName: "Dow Jones Industrial Average Index" },
+            { name: "INDEX:NKY", displayName: "Japan 225" },
+            { name: "INDEX:DEU40", displayName: "DAX Index" },
+            { name: "FOREXCOM:UKXGBP", displayName: "FTSE 100 Index" },
+          ],
+        },
+        {
+          name: "Forex",
+          originalName: "Forex",
+          symbols: [
+            { name: "FX:EURUSD", displayName: "EUR to USD" },
+            { name: "FX:GBPUSD", displayName: "GBP to USD" },
+            { name: "FX:USDJPY", displayName: "USD to JPY" },
+            { name: "FX:USDCHF", displayName: "USD to CHF" },
+            { name: "FX:AUDUSD", displayName: "AUD to USD" },
+            { name: "FX:USDCAD", displayName: "USD to CAD" },
+          ],
+        },
+        {
+          name: "Futures",
+          originalName: "Futures",
+          symbols: [
+            { name: "BMFBOVESPA:ISP1!", displayName: "S&P 500 Index Futures" },
+            { name: "BMFBOVESPA:EUR1!", displayName: "Euro Futures" },
+            { name: "PYTH:WTI3!", displayName: "WTI CRUDE OIL" },
+            { name: "BMFBOVESPA:ETH1!", displayName: "Hydrous ethanol" },
+            { name: "BMFBOVESPA:CCM1!", displayName: "Corn" },
+          ],
+        },
+        {
+          name: "Bonds",
+          originalName: "Bonds",
+          symbols: [
+            { name: "EUREX:FGBL1!", displayName: "Euro Bund" },
+            { name: "EUREX:FBTP1!", displayName: "Euro BTP" },
+            { name: "EUREX:FGBM1!", displayName: "Euro BOBL" },
+          ],
+        },
+      ],
+      showSymbolLogo: true,
+      isTransparent: false,
+      colorTheme: "dark",
+      locale: "en",
+      backgroundColor: "#131722",
+    })
 
     scriptRef.current = script
     document.head.appendChild(script)
@@ -129,7 +167,7 @@ export default function TradingViewAdvancedChart({
     // Timeout fallback
     const timeout = setTimeout(() => {
       if (isLoading) {
-        setError("Chart loading timed out. Please try again.")
+        setError("Market quotes loading timed out. Please try again.")
         setIsLoading(false)
       }
     }, 10000)
@@ -141,7 +179,7 @@ export default function TradingViewAdvancedChart({
         scriptRef.current = null
       }
     }
-  }, [symbol, retryCount])
+  }, [height, width, isFullscreen, retryCount])
 
   const mobileHeight = window.innerWidth < 768 ? "400px" : height
 
@@ -157,7 +195,7 @@ export default function TradingViewAdvancedChart({
             size="icon"
             onClick={retryLoad}
             className="bg-black/30 hover:bg-black/50 text-white"
-            title="Retry loading chart"
+            title="Retry loading widget"
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -186,7 +224,7 @@ export default function TradingViewAdvancedChart({
           <div className="absolute inset-0 flex items-center justify-center bg-[#131722] z-20">
             <div className="text-center">
               <Loader2 className="h-8 w-8 animate-spin mx-auto mb-4 text-blue-500" />
-              <p className="text-sm text-gray-400">Loading advanced chart...</p>
+              <p className="text-sm text-gray-400">Loading market quotes...</p>
               {retryCount > 0 && <p className="text-xs text-gray-500 mt-2">Retry attempt: {retryCount}</p>}
             </div>
           </div>
@@ -198,7 +236,7 @@ export default function TradingViewAdvancedChart({
               <AlertTriangle className="h-4 w-4" />
               <AlertDescription>
                 <div className="space-y-2">
-                  <p className="font-medium">Chart Loading Error</p>
+                  <p className="font-medium">Market Quotes Error</p>
                   <p className="text-sm">{error}</p>
                   <Button onClick={retryLoad} size="sm" className="w-full">
                     <RefreshCw className="h-4 w-4 mr-2" />

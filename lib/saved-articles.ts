@@ -3,280 +3,241 @@
 import { useCallback } from "react"
 import type { Article } from "@/types/news"
 import { getOptimizedImageUrl } from "./image-utils"
-import { supabase } from "./supabase"
 import { useAuth } from "@/contexts/auth-context"
 
-// Update the storage key
 const STORAGE_KEY = "luxora-times-saved-articles"
 
-// Get all saved articles (from Supabase if logged in, otherwise from localStorage)
-export async function getSavedArticles(userId?: string): Promise<Article[]> {
-  // If userId is provided, try to get from Supabase
-  if (userId) {
-    try {
-      const { data, error } = await supabase
-        .from("saved_articles")
-        .select("*")
-        .eq("user_id", userId)
-        .order("created_at", { ascending: false })
-
-      if (error) {
-        if (error.message.includes("not initialized")) {
-          console.warn("Supabase not initialized, falling back to localStorage")
-          return getLocalSavedArticles()
-        }
-        throw error
-      }
-
-      return data.map((record) => JSON.parse(record.article_data) as Article)
-    } catch (error) {
-      console.error("Error getting saved articles from Supabase:", error)
-      return getLocalSavedArticles()
-    }
-  }
-
-  // Otherwise, get from localStorage
-  return getLocalSavedArticles()
-}
-
-// Helper function to get saved articles from localStorage
-function getLocalSavedArticles(): Article[] {
-  if (typeof window === "undefined") return []
-
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    const articles = saved ? JSON.parse(saved) : []
-
-    // Ensure all articles have valid image URLs
-    return articles.map((article: Article) => ({
-      ...article,
-      imageUrl: article.imageUrl || "/placeholder.svg?height=400&width=600",
-    }))
-  } catch (error) {
-    console.error("Error getting saved articles from localStorage:", error)
-    return []
-  }
-}
-
-// Save an article (to Supabase if logged in, otherwise to localStorage)
-export async function saveArticle(article: Article, userId?: string): Promise<void> {
-  // Ensure the article has a valid image URL
-  const articleToSave = {
-    ...article,
-    imageUrl: getOptimizedImageUrl(article.imageUrl),
-  }
-
-  // If userId is provided, try to save to Supabase
-  if (userId) {
-    try {
-      // Check if article is already saved
-      const { data, error } = await supabase
-        .from("saved_articles")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("article_id", article.id)
-        .maybeSingle()
-
-      if (error) {
-        if (error.message.includes("not initialized")) {
-          console.warn("Supabase not initialized, falling back to localStorage")
-          return saveToLocalStorage(articleToSave)
-        }
-        throw error
-      }
-
-      // If not already saved, insert it
-      if (!data) {
-        const { error: insertError } = await supabase.from("saved_articles").insert([
-          {
-            user_id: userId,
-            article_id: article.id,
-            article_data: JSON.stringify(articleToSave),
-            created_at: new Date().toISOString(),
+class SavedArticlesService {
+  async getSavedArticles(userId?: string): Promise<Article[]> {
+    if (userId) {
+      try {
+        const response = await fetch(`/api/saved-articles?userId=${encodeURIComponent(userId)}`, {
+          method: "GET",
+          headers: {
+            "Content-Type": "application/json",
           },
-        ])
+        })
 
-        if (insertError) {
-          if (insertError.message.includes("not initialized")) {
-            console.warn("Supabase not initialized, falling back to localStorage")
-            return saveToLocalStorage(articleToSave)
-          }
-          throw insertError
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
         }
-      }
 
-      return
-    } catch (error) {
-      console.error("Error saving article to Supabase:", error)
-      return saveToLocalStorage(articleToSave)
+        const data = await response.json()
+
+        if (data.success && Array.isArray(data.articles)) {
+          // Also sync with localStorage
+          this.syncToLocalStorage(data.articles)
+          return data.articles
+        }
+
+        console.error("Failed to fetch saved articles:", data.error)
+        return this.getLocalSavedArticles()
+      } catch (error) {
+        console.error("Error fetching saved articles from server:", error)
+        return this.getLocalSavedArticles()
+      }
+    }
+
+    return this.getLocalSavedArticles()
+  }
+
+  async saveArticle(article: Article, userId?: string): Promise<void> {
+    const articleToSave = {
+      ...article,
+      imageUrl: getOptimizedImageUrl(article.imageUrl),
+      savedAt: new Date().toISOString(),
+    }
+
+    // Always save to localStorage first for immediate feedback
+    this.saveToLocalStorage(articleToSave)
+
+    if (userId) {
+      try {
+        const response = await fetch("/api/saved-articles", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId,
+            article: articleToSave,
+          }),
+        })
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
+        const data = await response.json()
+
+        if (!data.success) {
+          throw new Error(data.error || "Failed to save article")
+        }
+
+        return
+      } catch (error) {
+        console.error("Error saving article to server:", error)
+        // Article is already saved to localStorage, so we don't need to throw
+        return
+      }
     }
   }
 
-  // Otherwise, save to localStorage
-  return saveToLocalStorage(articleToSave)
-}
+  async removeSavedArticle(articleId: string, userId?: string): Promise<void> {
+    // Always remove from localStorage first for immediate feedback
+    this.removeFromLocalStorage(articleId)
 
-// Helper function to save to localStorage
-function saveToLocalStorage(article: Article): void {
-  if (typeof window === "undefined") return
+    if (userId) {
+      try {
+        const response = await fetch("/api/saved-articles", {
+          method: "DELETE",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            userId,
+            articleId,
+          }),
+        })
 
-  try {
-    const savedArticles = getLocalSavedArticles()
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
 
-    // Check if article is already saved
-    if (!savedArticles.some((saved) => saved.id === article.id)) {
-      const updatedSaved = [...savedArticles, article]
+        const data = await response.json()
+
+        if (!data.success) {
+          throw new Error(data.error || "Failed to remove article")
+        }
+
+        return
+      } catch (error) {
+        console.error("Error removing article from server:", error)
+        // Article is already removed from localStorage
+        return
+      }
+    }
+  }
+
+  async isArticleSaved(articleId: string, userId?: string): Promise<boolean> {
+    if (userId) {
+      try {
+        const articles = await this.getSavedArticles(userId)
+        return articles.some((article) => article.id === articleId)
+      } catch (error) {
+        console.error("Error checking if article is saved:", error)
+        return this.isArticleSavedInLocalStorage(articleId)
+      }
+    }
+
+    return this.isArticleSavedInLocalStorage(articleId)
+  }
+
+  async getSavedArticleById(articleId: string, userId?: string): Promise<Article | null> {
+    const articles = await this.getSavedArticles(userId)
+    return articles.find((article) => article.id === articleId) || null
+  }
+
+  private getLocalSavedArticles(): Article[] {
+    if (typeof window === "undefined") return []
+
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      const articles = saved ? JSON.parse(saved) : []
+
+      return articles.map((article: Article) => ({
+        ...article,
+        imageUrl: article.imageUrl || "/placeholder.svg?height=400&width=600",
+      }))
+    } catch (error) {
+      console.error("Error getting saved articles from localStorage:", error)
+      return []
+    }
+  }
+
+  private saveToLocalStorage(article: Article): void {
+    if (typeof window === "undefined") return
+
+    try {
+      const savedArticles = this.getLocalSavedArticles()
+
+      if (!savedArticles.some((saved) => saved.id === article.id)) {
+        const updatedSaved = [article, ...savedArticles] // Add to beginning for recency
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSaved))
+      }
+    } catch (error) {
+      console.error("Error saving article to localStorage:", error)
+    }
+  }
+
+  private removeFromLocalStorage(articleId: string): void {
+    if (typeof window === "undefined") return
+
+    try {
+      const savedArticles = this.getLocalSavedArticles()
+      const updatedSaved = savedArticles.filter((article) => article.id !== articleId)
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSaved))
-    }
-  } catch (error) {
-    console.error("Error saving article to localStorage:", error)
-  }
-}
-
-// Remove a saved article (from Supabase if logged in, otherwise from localStorage)
-export async function removeSavedArticle(articleId: string, userId?: string): Promise<void> {
-  // If userId is provided, try to remove from Supabase
-  if (userId) {
-    try {
-      const { error } = await supabase.from("saved_articles").delete().eq("user_id", userId).eq("article_id", articleId)
-
-      if (error) {
-        if (error.message.includes("not initialized")) {
-          console.warn("Supabase not initialized, falling back to localStorage")
-          return removeFromLocalStorage(articleId)
-        }
-        throw error
-      }
-
-      return
     } catch (error) {
-      console.error("Error removing saved article from Supabase:", error)
-      return removeFromLocalStorage(articleId)
+      console.error("Error removing saved article from localStorage:", error)
     }
   }
 
-  // Otherwise, remove from localStorage
-  return removeFromLocalStorage(articleId)
-}
+  private isArticleSavedInLocalStorage(articleId: string): boolean {
+    if (typeof window === "undefined") return false
 
-// Helper function to remove from localStorage
-function removeFromLocalStorage(articleId: string): void {
-  if (typeof window === "undefined") return
-
-  try {
-    const savedArticles = getLocalSavedArticles()
-    const updatedSaved = savedArticles.filter((article) => article.id !== articleId)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updatedSaved))
-  } catch (error) {
-    console.error("Error removing saved article from localStorage:", error)
-  }
-}
-
-// Check if an article is saved (in Supabase if logged in, otherwise in localStorage)
-export async function isArticleSaved(articleId: string, userId?: string): Promise<boolean> {
-  // If userId is provided, try to check in Supabase
-  if (userId) {
     try {
-      const { data, error } = await supabase
-        .from("saved_articles")
-        .select("id")
-        .eq("user_id", userId)
-        .eq("article_id", articleId)
-        .maybeSingle()
-
-      if (error) {
-        if (error.message.includes("not initialized")) {
-          console.warn("Supabase not initialized, falling back to localStorage")
-          return isArticleSavedInLocalStorage(articleId)
-        }
-        throw error
-      }
-
-      return !!data
+      const savedArticles = this.getLocalSavedArticles()
+      return savedArticles.some((article) => article.id === articleId)
     } catch (error) {
-      console.error("Error checking if article is saved in Supabase:", error)
-      return isArticleSavedInLocalStorage(articleId)
+      console.error("Error checking if article is saved in localStorage:", error)
+      return false
     }
   }
 
-  // Otherwise, check in localStorage
-  return isArticleSavedInLocalStorage(articleId)
-}
+  private syncToLocalStorage(articles: Article[]): void {
+    if (typeof window === "undefined") return
 
-// Helper function to check if saved in localStorage
-function isArticleSavedInLocalStorage(articleId: string): boolean {
-  if (typeof window === "undefined") return false
-
-  try {
-    const savedArticles = getLocalSavedArticles()
-    return savedArticles.some((article) => article.id === articleId)
-  } catch (error) {
-    console.error("Error checking if article is saved in localStorage:", error)
-    return false
-  }
-}
-
-// Get a saved article by ID (from Supabase if logged in, otherwise from localStorage)
-export async function getSavedArticleById(articleId: string, userId?: string): Promise<Article | null> {
-  // If userId is provided, try to get from Supabase
-  if (userId) {
     try {
-      const { data, error } = await supabase
-        .from("saved_articles")
-        .select("*")
-        .eq("user_id", userId)
-        .eq("article_id", articleId)
-        .maybeSingle()
-
-      if (error) {
-        if (error.message.includes("not initialized")) {
-          console.warn("Supabase not initialized, falling back to localStorage")
-          return getSavedArticleByIdFromLocalStorage(articleId)
-        }
-        throw error
-      }
-
-      return data ? (JSON.parse(data.article_data) as Article) : null
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(articles))
     } catch (error) {
-      console.error("Error getting saved article by ID from Supabase:", error)
-      return getSavedArticleByIdFromLocalStorage(articleId)
+      console.error("Error syncing articles to localStorage:", error)
     }
   }
-
-  // Otherwise, get from localStorage
-  return getSavedArticleByIdFromLocalStorage(articleId)
 }
 
-// Helper function to get saved article by ID from localStorage
-function getSavedArticleByIdFromLocalStorage(articleId: string): Article | null {
-  if (typeof window === "undefined") return null
+const savedArticlesService = new SavedArticlesService()
 
-  try {
-    const savedArticles = getLocalSavedArticles()
-    return savedArticles.find((article) => article.id === articleId) || null
-  } catch (error) {
-    console.error("Error getting saved article by ID from localStorage:", error)
-    return null
-  }
-}
-
-// Hook for saved articles
 export function useSavedArticles() {
   const { user } = useAuth()
   const userId = user?.id
 
-  // Memoize functions to prevent unnecessary re-renders
-  const getSavedArticlesFunc = useCallback(() => getSavedArticles(userId), [userId])
-  const saveArticleFunc = useCallback((article: Article) => saveArticle(article, userId), [userId])
-  const removeSavedArticleFunc = useCallback((articleId: string) => removeSavedArticle(articleId, userId), [userId])
-  const isArticleSavedFunc = useCallback((articleId: string) => isArticleSaved(articleId, userId), [userId])
-  const getSavedArticleByIdFunc = useCallback((articleId: string) => getSavedArticleById(articleId, userId), [userId])
+  const getSavedArticles = useCallback(() => savedArticlesService.getSavedArticles(userId), [userId])
+
+  const saveArticle = useCallback((article: Article) => savedArticlesService.saveArticle(article, userId), [userId])
+
+  const removeSavedArticle = useCallback(
+    (articleId: string) => savedArticlesService.removeSavedArticle(articleId, userId),
+    [userId],
+  )
+
+  const isArticleSaved = useCallback(
+    (articleId: string) => savedArticlesService.isArticleSaved(articleId, userId),
+    [userId],
+  )
+
+  const getSavedArticleById = useCallback(
+    (articleId: string) => savedArticlesService.getSavedArticleById(articleId, userId),
+    [userId],
+  )
 
   return {
-    getSavedArticles: getSavedArticlesFunc,
-    saveArticle: saveArticleFunc,
-    removeSavedArticle: removeSavedArticleFunc,
-    isArticleSaved: isArticleSavedFunc,
-    getSavedArticleById: getSavedArticleByIdFunc,
+    getSavedArticles,
+    saveArticle,
+    removeSavedArticle,
+    isArticleSaved,
+    getSavedArticleById,
   }
 }
+
+export const { getSavedArticles, saveArticle, removeSavedArticle, isArticleSaved, getSavedArticleById } =
+  savedArticlesService

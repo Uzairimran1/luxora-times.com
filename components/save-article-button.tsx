@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { Bookmark, BookmarkCheck, LogIn } from "lucide-react"
+import { Bookmark, BookmarkCheck, LogIn, Loader2 } from "lucide-react"
 import type { Article } from "@/types/news"
 import { useSavedArticles } from "@/lib/saved-articles"
 import { Button } from "@/components/ui/button"
@@ -26,7 +26,7 @@ interface SaveArticleButtonProps {
 
 export default function SaveArticleButton({ article, variant = "icon", className }: SaveArticleButtonProps) {
   const router = useRouter()
-  const { user } = useAuth()
+  const { user, isAuthenticated } = useAuth()
   const { saveArticle, removeSavedArticle, isArticleSaved } = useSavedArticles()
   const [saved, setSaved] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -38,23 +38,26 @@ export default function SaveArticleButton({ article, variant = "icon", className
     let isMounted = true
 
     const checkIfSaved = async () => {
-      setIsChecking(true)
-      // Only check if saved if user is logged in
-      if (user) {
+      try {
+        setIsChecking(true)
         const isSaved = await isArticleSaved(article.id)
-        // Only update state if the component is still mounted
         if (isMounted) {
           setSaved(isSaved)
         }
-      }
-      if (isMounted) {
-        setIsChecking(false)
+      } catch (error) {
+        console.error("Error checking if article is saved:", error)
+        if (isMounted) {
+          setSaved(false)
+        }
+      } finally {
+        if (isMounted) {
+          setIsChecking(false)
+        }
       }
     }
 
     checkIfSaved()
 
-    // Cleanup function
     return () => {
       isMounted = false
     }
@@ -63,8 +66,7 @@ export default function SaveArticleButton({ article, variant = "icon", className
   const toggleSave = async () => {
     if (isProcessing) return
 
-    // If not logged in, show auth dialog
-    if (!user) {
+    if (!isAuthenticated) {
       setShowAuthDialog(true)
       return
     }
@@ -93,7 +95,7 @@ export default function SaveArticleButton({ article, variant = "icon", className
       console.error("Error toggling save state:", error)
       toast({
         title: "Error",
-        description: "There was an error processing your request.",
+        description: "There was an error processing your request. Please try again.",
         variant: "destructive",
         duration: 3000,
       })
@@ -114,14 +116,20 @@ export default function SaveArticleButton({ article, variant = "icon", className
           onClick={toggleSave}
           disabled={isProcessing || isChecking}
           className={cn(
-            "p-2 rounded-full transition-colors",
+            "p-2 rounded-full transition-colors relative",
             (isProcessing || isChecking) && "opacity-50 cursor-not-allowed",
             saved ? "text-primary" : "text-foreground/70 hover:text-foreground",
             className,
           )}
           aria-label={saved ? "Remove from saved articles" : "Save article"}
         >
-          {saved ? <BookmarkCheck className="h-5 w-5" /> : <Bookmark className="h-5 w-5" />}
+          {isProcessing ? (
+            <Loader2 className="h-5 w-5 animate-spin" />
+          ) : saved ? (
+            <BookmarkCheck className="h-5 w-5" />
+          ) : (
+            <Bookmark className="h-5 w-5" />
+          )}
         </button>
 
         <Dialog open={showAuthDialog} onOpenChange={setShowAuthDialog}>
@@ -154,7 +162,12 @@ export default function SaveArticleButton({ article, variant = "icon", className
         disabled={isProcessing || isChecking}
         className={cn("rounded-full", (isProcessing || isChecking) && "opacity-50 cursor-not-allowed", className)}
       >
-        {saved ? (
+        {isProcessing ? (
+          <>
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            {saved ? "Removing..." : "Saving..."}
+          </>
+        ) : saved ? (
           <>
             <BookmarkCheck className="h-4 w-4 mr-2" />
             Saved

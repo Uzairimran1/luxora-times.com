@@ -1,18 +1,33 @@
 import { type NextRequest, NextResponse } from "next/server"
 import { fetchGoogleNewsRSS } from "@/lib/google-news-service"
+import { createErrorResponse, sanitizeInput, AppError } from "@/lib/error-handler"
 
 export async function GET(request: NextRequest) {
   try {
-    const topic = request.nextUrl.searchParams.get("topic") || "world news"
-    console.log(`API route called with topic: ${topic}`)
+    const { searchParams } = new URL(request.url)
+    const topic = searchParams.get("topic")
 
-    const articles = await fetchGoogleNewsRSS(topic)
-    console.log(`Fetched ${articles.length} articles`)
+    if (!topic) {
+      throw new AppError(400, "Topic parameter is required", "MISSING_TOPIC")
+    }
 
-    // Return the articles in the expected format
-    return NextResponse.json({ articles })
+    const sanitizedTopic = sanitizeInput(topic)
+    if (!sanitizedTopic) {
+      throw new AppError(400, "Invalid topic parameter", "INVALID_TOPIC")
+    }
+
+    console.log(`Fetching Google News for topic: ${sanitizedTopic}`)
+
+    const articles = await fetchGoogleNewsRSS(sanitizedTopic)
+
+    return NextResponse.json({
+      success: true,
+      articles: articles || [],
+      total: articles?.length || 0,
+      topic: sanitizedTopic,
+      timestamp: new Date().toISOString(),
+    })
   } catch (error) {
-    console.error("Error in Google News API:", error)
-    return NextResponse.json({ error: "Failed to fetch Google News", articles: [] }, { status: 500 })
+    return createErrorResponse(error, "Failed to fetch Google News")
   }
 }
