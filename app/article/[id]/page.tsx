@@ -9,12 +9,11 @@ import SaveArticleButton from "@/components/save-article-button"
 import NewsCard from "@/components/news-card"
 import { getSavedArticleById } from "@/lib/saved-articles"
 import BackButton from "@/components/back-button"
-import { ErrorBoundary } from "@/components/error-boundary"
-import { Alert, AlertDescription } from "@/components/ui/alert"
-import { AlertTriangle, ExternalLink } from "lucide-react"
+import { ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-export const revalidate = 3600 // Revalidate every hour
+export const dynamic = "force-dynamic"
+export const revalidate = 0
 
 interface ArticlePageProps {
   params: {
@@ -159,33 +158,6 @@ async function getRelatedArticles(category: string) {
   }
 }
 
-// Enhanced error fallback for article page
-function ArticleErrorFallback({ error, resetErrorBoundary }: { error?: Error; resetErrorBoundary?: () => void }) {
-  return (
-    <div className="max-w-4xl mx-auto p-4">
-      <Alert variant="destructive" className="mb-6">
-        <AlertTriangle className="h-4 w-4" />
-        <AlertDescription>
-          <div className="space-y-2">
-            <p className="font-medium">Failed to load article</p>
-            <p className="text-sm">{error?.message || "The article could not be found or loaded."}</p>
-            <div className="flex gap-2 mt-4">
-              {resetErrorBoundary && (
-                <Button onClick={resetErrorBoundary} variant="outline" size="sm">
-                  Try Again
-                </Button>
-              )}
-              <Button asChild variant="outline" size="sm">
-                <Link href="/">Go Home</Link>
-              </Button>
-            </div>
-          </div>
-        </AlertDescription>
-      </Alert>
-    </div>
-  )
-}
-
 export default async function ArticlePage({ params }: ArticlePageProps) {
   try {
     const article = await getArticleById(params.id)
@@ -206,98 +178,111 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
       : []
 
     return (
-      <ErrorBoundary fallback={ArticleErrorFallback}>
-        <div className="max-w-4xl mx-auto p-4">
-          <div className="mb-4">
-            <BackButton fallbackPath={`/category/${article.category}`} />
-          </div>
-
-          <div className="mb-8">
-            <div className="text-sm text-muted-foreground mb-2">
-              <Link href={`/category/${article.category}`} className="text-primary hover:underline">
-                {article.category.charAt(0).toUpperCase() + article.category.slice(1)}
-              </Link>{" "}
-              &bull; {formattedDate}
-            </div>
-
-            <h1 className="text-2xl md:text-3xl font-bold mb-4">{article.title}</h1>
-
-            <div className="flex items-center justify-between mb-6">
-              <div className="text-sm text-muted-foreground">
-                Source: <span className="font-medium">{article.source}</span>
-              </div>
-
-              <SaveArticleButton article={article} variant="button" />
-            </div>
-
-            <div className="relative aspect-video w-full mb-6 overflow-hidden rounded-lg">
-              <Image
-                src={article.imageUrl || "/placeholder.svg?height=600&width=1200"}
-                alt={article.title}
-                fill
-                className="object-cover"
-                priority
-                sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
-                onError={(e) => {
-                  const target = e.target as HTMLImageElement
-                  target.src = "/placeholder.svg?height=600&width=1200"
-                }}
-              />
-            </div>
-
-            <div className="article-content">
-              <p className="text-lg font-medium mb-6">{article.description}</p>
-
-              {processedContent.length > 0 ? (
-                processedContent.map((paragraph, index) => (
-                  <p key={index} className="mb-4">
-                    {paragraph}
-                  </p>
-                ))
-              ) : (
-                <p className="mb-4 text-muted-foreground">
-                  Full article content is available at the source link below.
-                </p>
-              )}
-
-              {article.url && (
-                <div className="mt-8 p-4 bg-muted rounded-md">
-                  <p className="font-medium mb-2">Read the full article:</p>
-                  <Button asChild variant="outline" className="w-full">
-                    <a
-                      href={article.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-2"
-                    >
-                      <ExternalLink className="h-4 w-4" />
-                      Open Original Article
-                    </a>
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {relatedArticles.length > 0 && (
-            <div className="border-t border-border pt-8 mt-8">
-              <h2 className="text-2xl font-bold mb-4">Related Articles</h2>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {relatedArticles
-                  .filter((related) => related.id !== article.id)
-                  .slice(0, 3)
-                  .map((related) => (
-                    <NewsCard key={related.id} article={related} showCategory={false} />
-                  ))}
-              </div>
-            </div>
-          )}
+      <div className="max-w-4xl mx-auto p-4">
+        <div className="mb-4">
+          <BackButton fallbackPath={`/category/${article.category}`} />
         </div>
-      </ErrorBoundary>
+
+        <div className="mb-8">
+          <div className="text-sm text-muted-foreground mb-2">
+            <Link href={`/category/${article.category}`} className="text-primary hover:underline">
+              {article.category.charAt(0).toUpperCase() + article.category.slice(1)}
+            </Link>{" "}
+            &bull; {formattedDate}
+          </div>
+
+          <h1 className="text-2xl md:text-3xl font-bold mb-4">{article.title}</h1>
+
+          <div className="flex items-center justify-between mb-6">
+            <div className="text-sm text-muted-foreground">
+              Source: <span className="font-medium">{article.source}</span>
+            </div>
+
+            <SaveArticleButton article={article} variant="button" />
+          </div>
+
+          <div className="relative aspect-video w-full mb-6 overflow-hidden rounded-lg">
+            <Image
+              src={article.imageUrl || "/placeholder.svg?height=600&width=1200"}
+              alt={article.title}
+              fill
+              className="object-cover"
+              priority
+              sizes="(max-width: 768px) 100vw, (max-width: 1200px) 80vw, 70vw"
+              onError={(e) => {
+                const target = e.target as HTMLImageElement
+                target.src = "/placeholder.svg?height=600&width=1200"
+              }}
+            />
+          </div>
+
+          <div className="article-content">
+            <p className="text-lg font-medium mb-6">{article.description}</p>
+
+            {processedContent.length > 0 ? (
+              processedContent.map((paragraph, index) => (
+                <p key={index} className="mb-4">
+                  {paragraph}
+                </p>
+              ))
+            ) : (
+              <p className="mb-4 text-muted-foreground">Full article content is available at the source link below.</p>
+            )}
+
+            {article.url && (
+              <div className="mt-8 p-4 bg-muted rounded-md">
+                <p className="font-medium mb-2">Read the full article:</p>
+                <Button asChild variant="outline" className="w-full">
+                  <a
+                    href={article.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-center justify-center gap-2"
+                  >
+                    <ExternalLink className="h-4 w-4" />
+                    Open Original Article
+                  </a>
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {relatedArticles.length > 0 && (
+          <div className="border-t border-border pt-8 mt-8">
+            <h2 className="text-2xl font-bold mb-4">Related Articles</h2>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {relatedArticles
+                .filter((related) => related.id !== article.id)
+                .slice(0, 3)
+                .map((related) => (
+                  <NewsCard key={related.id} article={related} showCategory={false} />
+                ))}
+            </div>
+          </div>
+        )}
+      </div>
     )
   } catch (error) {
     console.error("Error in ArticlePage:", error)
-    return <ArticleErrorFallback error={error as Error} />
+    return (
+      <div className="max-w-4xl mx-auto p-4">
+        <div className="bg-destructive/10 border border-destructive rounded-md p-4">
+          <h2 className="text-lg font-semibold text-destructive mb-2">Error Loading Article</h2>
+          <p className="text-muted-foreground">
+            We encountered an error while loading this article. Please try again or return to the home page.
+          </p>
+          <div className="mt-4 flex gap-2">
+            <Button asChild variant="outline" size="sm">
+              <Link href="/">Go Home</Link>
+            </Button>
+            <Button onClick={() => window.location.reload()} variant="outline" size="sm">
+              Try Again
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
   }
 }
