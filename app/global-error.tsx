@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { AlertTriangle } from "lucide-react"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AlertTriangle, Home, RefreshCw } from "lucide-react"
 
 export default function GlobalError({
   error,
@@ -11,29 +11,46 @@ export default function GlobalError({
   error: Error & { digest?: string }
   reset: () => void
 }) {
-  useEffect(() => {
-    console.error("Global error:", error)
-  }, [error])
-
   return (
     <html>
       <body>
-        <div className="flex flex-col items-center justify-center min-h-screen text-center px-4">
-          <AlertTriangle className="h-16 w-16 text-red-500 mb-6" />
+        <div className="min-h-screen flex items-center justify-center p-4">
+          <div className="max-w-md w-full">
+            <Alert variant="destructive" className="mb-6">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertDescription>
+                <div className="space-y-4">
+                  <div>
+                    <p className="font-medium">Something went wrong!</p>
+                    <p className="text-sm">
+                      We encountered an unexpected error. This could be a temporary issue with our servers or your
+                      connection.
+                    </p>
+                    {error.digest && <p className="text-xs mt-2 font-mono">Error ID: {error.digest}</p>}
+                  </div>
 
-          <h1 className="text-3xl font-bold mb-2">Application Error</h1>
+                  <div className="flex flex-col gap-2">
+                    <Button onClick={reset} className="flex items-center gap-2">
+                      <RefreshCw className="h-4 w-4" />
+                      Try again
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => (window.location.href = "/")}
+                      className="flex items-center gap-2"
+                    >
+                      <Home className="h-4 w-4" />
+                      Go home
+                    </Button>
+                  </div>
+                </div>
+              </AlertDescription>
+            </Alert>
 
-          <p className="text-gray-600 mb-6 max-w-md">
-            A critical error occurred. Please refresh the page or contact support if the issue persists.
-          </p>
-
-          {error.digest && (
-            <p className="text-xs text-gray-500 mb-6 font-mono bg-gray-100 px-2 py-1 rounded">
-              Error ID: {error.digest}
-            </p>
-          )}
-
-          <Button onClick={reset}>Try again</Button>
+            <div className="text-center text-sm text-muted-foreground">
+              <p>If this problem persists, please contact support.</p>
+            </div>
+          </div>
         </div>
       </body>
     </html>

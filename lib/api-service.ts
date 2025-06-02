@@ -1,6 +1,6 @@
 import type { Article, NewsApiResponse, NewsSource, ApiUsage } from "@/types/news"
 import { getOptimizedImageUrl, extractImageFromContent } from "./image-utils"
-import { fallbackArticles, getFallbackArticlesByCategory } from "./fallback-data"
+import { getFallbackArticlesByCategory } from "./fallback-data"
 import { searchOxylabsNews } from "./oxylabs-service"
 
 // Define available API sources with their respective endpoints and keys
@@ -50,6 +50,79 @@ NEWS_SOURCES.forEach((source) => {
     lastUpdated: Date.now(),
   }
 })
+
+// Enhanced fallback data for when APIs fail
+const createMockArticle = (title: string, category: string, index: number): Article => ({
+  id: `mock-${category}-${index}`,
+  title,
+  description: `This is a sample ${category} article. The full content would be available from the original source.`,
+  content: `This is a sample ${category} article with detailed content. In a real scenario, this would contain the full article text from the news source.`,
+  url: `https://example.com/news/${category}/${index}`,
+  imageUrl: `/placeholder.svg?height=400&width=600&text=${encodeURIComponent(title)}`,
+  publishedAt: new Date(Date.now() - index * 3600000).toISOString(), // Stagger times
+  source: "Sample News",
+  category,
+})
+
+const getMockArticles = (category?: string, count = 10): Article[] => {
+  const categories = ["business", "technology", "science", "health", "sports", "entertainment"]
+  const targetCategory = category || "general"
+
+  const titles = {
+    business: [
+      "Market Analysis: Tech Stocks Show Strong Performance",
+      "Global Economy Outlook for Next Quarter",
+      "Cryptocurrency Market Trends and Analysis",
+      "Banking Sector Updates and Regulatory Changes",
+      "Startup Funding Reaches New Heights",
+    ],
+    technology: [
+      "AI Breakthrough in Machine Learning Research",
+      "New Smartphone Technology Revolutionizes Industry",
+      "Cybersecurity Threats and Protection Strategies",
+      "Cloud Computing Adoption Accelerates",
+      "Tech Giants Announce Major Partnerships",
+    ],
+    science: [
+      "Climate Change Research Shows New Findings",
+      "Space Exploration Mission Achieves Milestone",
+      "Medical Research Breakthrough in Treatment",
+      "Environmental Conservation Efforts Expand",
+      "Scientific Discovery Changes Understanding",
+    ],
+    health: [
+      "New Treatment Options for Common Conditions",
+      "Public Health Initiative Shows Positive Results",
+      "Mental Health Awareness Campaign Launches",
+      "Medical Technology Advances Patient Care",
+      "Health Research Reveals Important Insights",
+    ],
+    sports: [
+      "Championship Finals Draw Record Viewership",
+      "Athlete Breaks Long-Standing Record",
+      "Sports Technology Enhances Performance",
+      "International Tournament Announces Schedule",
+      "Team Management Changes Announced",
+    ],
+    entertainment: [
+      "Film Industry Celebrates Award Season",
+      "Music Festival Lineup Announced",
+      "Streaming Platform Launches New Content",
+      "Celebrity News and Industry Updates",
+      "Entertainment Technology Innovations",
+    ],
+  }
+
+  const categoryTitles = titles[targetCategory as keyof typeof titles] || titles.business
+
+  return Array.from({ length: count }, (_, index) =>
+    createMockArticle(
+      categoryTitles[index % categoryTitles.length] || `Sample ${targetCategory} Article ${index + 1}`,
+      targetCategory,
+      index,
+    ),
+  )
+}
 
 // Get the best available API source based on remaining calls and priority
 const getActiveSource = (): NewsSource | null => {
@@ -196,7 +269,7 @@ const mapCategory = (category: string | undefined, apiSource: string): string =>
 }
 
 // Fetch with timeout and retry
-async function fetchWithRetry(url: string, options: RequestInit, retries = 3, timeout = 10000): Promise<Response> {
+async function fetchWithRetry(url: string, options: RequestInit, retries = 2, timeout = 8000): Promise<Response> {
   // Create an abort controller for the timeout
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), timeout)
@@ -213,12 +286,12 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 3, ti
     if (retries <= 1) throw error
 
     // Wait before retrying (exponential backoff)
-    await new Promise((resolve) => setTimeout(resolve, 1000 * (4 - retries)))
+    await new Promise((resolve) => setTimeout(resolve, 1000 * (3 - retries)))
     return fetchWithRetry(url, options, retries - 1, timeout)
   }
 }
 
-// Fetch top headlines with failover between APIs
+// Fetch top headlines with enhanced fallback
 export async function fetchTopHeadlines(category?: string, country = "us", pageSize = 10): Promise<Article[]> {
   console.log(`Fetching top headlines for category: ${category || "general"}, country: ${country}, size: ${pageSize}`)
 
@@ -232,35 +305,38 @@ export async function fetchTopHeadlines(category?: string, country = "us", pageS
   // Get fallback data ready in case of failure
   const fallbackData = category
     ? getFallbackArticlesByCategory(category, pageSize)
-    : fallbackArticles.slice(0, pageSize)
-
-  // Get the best available API source
-  let source = getActiveSource()
-  if (!source) {
-    console.error("No active API source available")
-    return fallbackData
-  }
+    : getMockArticles(category, pageSize)
 
   try {
+    // Get the best available API source
+    const source = getActiveSource()
+
+    // If no API source is available, return mock data immediately
+    if (!source) {
+      console.log("No active API source available, using mock data")
+      const mockData = getMockArticles(category, pageSize)
+      cacheResponse(cacheKey, mockData)
+      return mockData
+    }
+
     let articles: Article[] = []
-    let apiSourceId = source.id
 
-    // Try the first API
+    // Try NewsAPI first if available
     if (source.id === "newsapi") {
-      const params = new URLSearchParams({
-        country,
-        pageSize: pageSize.toString(),
-        apiKey: source.apiKey as string,
-      })
-
-      if (category) {
-        params.append("category", mapCategory(category, "newsapi"))
-      }
-
-      const url = `${source.baseUrl}${source.endpoints.topHeadlines}?${params.toString()}`
-      console.log(`Fetching from NewsAPI: ${url.replace(source.apiKey as string, "API_KEY_HIDDEN")}`)
-
       try {
+        const params = new URLSearchParams({
+          country,
+          pageSize: Math.min(pageSize, 20).toString(), // Limit to avoid rate limits
+          apiKey: source.apiKey as string,
+        })
+
+        if (category && category !== "general") {
+          params.append("category", mapCategory(category, "newsapi"))
+        }
+
+        const url = `${source.baseUrl}${source.endpoints.topHeadlines}?${params.toString()}`
+        console.log(`Fetching from NewsAPI: ${url.replace(source.apiKey as string, "API_KEY_HIDDEN")}`)
+
         const response = await fetchWithRetry(url, {
           next: { revalidate: 3600 }, // Cache for 1 hour
         })
@@ -275,146 +351,60 @@ export async function fetchTopHeadlines(category?: string, country = "us", pageS
               normalized.category = category || "general"
               return normalized
             })
-          } else {
-            console.log("NewsAPI returned no articles, trying fallback source")
+            console.log(`Successfully fetched ${articles.length} articles from NewsAPI`)
           }
         } else {
-          console.error(`NewsAPI responded with status: ${response.status}, trying fallback source`)
+          console.error(`NewsAPI responded with status: ${response.status}`)
+          if (response.status === 426) {
+            console.log("NewsAPI rate limit exceeded, marking as inactive temporarily")
+            // Temporarily disable this source
+            source.active = false
+          }
         }
       } catch (error) {
         console.error(`Error fetching from NewsAPI: ${error instanceof Error ? error.message : String(error)}`)
       }
+    }
 
-      // If first API fails or returns no results, try the second one
-      if (articles.length === 0) {
-        const fallbackSource = NEWS_SOURCES.find((s) => s.id === "newsdata")
-        if (fallbackSource && fallbackSource.active && fallbackSource.apiKey) {
-          source = fallbackSource
-          apiSourceId = "newsdata"
-
+    // If NewsAPI failed, try NewsData.io
+    if (articles.length === 0) {
+      const fallbackSource = NEWS_SOURCES.find((s) => s.id === "newsdata" && s.active)
+      if (fallbackSource && fallbackSource.apiKey) {
+        try {
           const params = new URLSearchParams({
-            apikey: source.apiKey as string,
+            apikey: fallbackSource.apiKey as string,
             country,
-            size: pageSize.toString(),
+            size: Math.min(pageSize, 10).toString(), // Limit to avoid rate limits
           })
 
-          if (category) {
+          if (category && category !== "general") {
             params.append("category", mapCategory(category, "newsdata"))
           }
 
-          const url = `${source.baseUrl}${source.endpoints.topHeadlines}?${params.toString()}`
-          console.log(`Fetching from NewsData: ${url.replace(source.apiKey as string, "API_KEY_HIDDEN")}`)
+          const url = `${fallbackSource.baseUrl}${fallbackSource.endpoints.topHeadlines}?${params.toString()}`
+          console.log(`Fetching from NewsData: ${url.replace(fallbackSource.apiKey as string, "API_KEY_HIDDEN")}`)
 
-          try {
-            const response = await fetchWithRetry(url, {
-              next: { revalidate: 3600 }, // Cache for 1 hour
-            })
-
-            if (response.ok) {
-              const data = await response.json()
-              updateApiUsage(source.id)
-
-              if (data.results && data.results.length > 0) {
-                articles = data.results.map((article: any) => {
-                  const normalized = normalizeArticle(article, source.name, "newsdata")
-                  normalized.category = category || "general"
-                  return normalized
-                })
-              } else {
-                console.log("NewsData returned no articles, using fallback data")
-              }
-            } else {
-              console.error(`NewsData responded with status: ${response.status}, using fallback data`)
-            }
-          } catch (error) {
-            console.error(`Error fetching from NewsData: ${error instanceof Error ? error.message : String(error)}`)
-          }
-        }
-      }
-    } else if (source.id === "newsdata") {
-      // Start with NewsData.io
-      const params = new URLSearchParams({
-        apikey: source.apiKey as string,
-        country,
-        size: pageSize.toString(),
-      })
-
-      if (category) {
-        params.append("category", mapCategory(category, "newsdata"))
-      }
-
-      const url = `${source.baseUrl}${source.endpoints.topHeadlines}?${params.toString()}`
-      console.log(`Fetching from NewsData: ${url.replace(source.apiKey as string, "API_KEY_HIDDEN")}`)
-
-      try {
-        const response = await fetchWithRetry(url, {
-          next: { revalidate: 3600 }, // Cache for 1 hour
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          updateApiUsage(source.id)
-
-          if (data.results && data.results.length > 0) {
-            articles = data.results.map((article: any) => {
-              const normalized = normalizeArticle(article, source.name, "newsdata")
-              normalized.category = category || "general"
-              return normalized
-            })
-          } else {
-            console.log("NewsData returned no articles, trying fallback source")
-          }
-        } else {
-          console.error(`NewsData responded with status: ${response.status}, trying fallback source`)
-        }
-      } catch (error) {
-        console.error(`Error fetching from NewsData: ${error instanceof Error ? error.message : String(error)}`)
-      }
-
-      // If first API fails or returns no results, try the second one
-      if (articles.length === 0) {
-        const fallbackSource = NEWS_SOURCES.find((s) => s.id === "newsapi")
-        if (fallbackSource && fallbackSource.active && fallbackSource.apiKey) {
-          source = fallbackSource
-          apiSourceId = "newsapi"
-
-          const params = new URLSearchParams({
-            country,
-            pageSize: pageSize.toString(),
-            apiKey: source.apiKey as string,
+          const response = await fetchWithRetry(url, {
+            next: { revalidate: 3600 }, // Cache for 1 hour
           })
 
-          if (category) {
-            params.append("category", mapCategory(category, "newsapi"))
-          }
+          if (response.ok) {
+            const data = await response.json()
+            updateApiUsage(fallbackSource.id)
 
-          const url = `${source.baseUrl}${source.endpoints.topHeadlines}?${params.toString()}`
-          console.log(`Fetching from NewsAPI: ${url.replace(source.apiKey as string, "API_KEY_HIDDEN")}`)
-
-          try {
-            const response = await fetchWithRetry(url, {
-              next: { revalidate: 3600 }, // Cache for 1 hour
-            })
-
-            if (response.ok) {
-              const data: NewsApiResponse = await response.json()
-              updateApiUsage(source.id)
-
-              if (data.articles && data.articles.length > 0) {
-                articles = data.articles.map((article) => {
-                  const normalized = normalizeArticle(article, source.name, "newsapi")
-                  normalized.category = category || "general"
-                  return normalized
-                })
-              } else {
-                console.log("NewsAPI returned no articles, using fallback data")
-              }
-            } else {
-              console.error(`NewsAPI responded with status: ${response.status}, using fallback data`)
+            if (data.results && data.results.length > 0) {
+              articles = data.results.map((article: any) => {
+                const normalized = normalizeArticle(article, fallbackSource.name, "newsdata")
+                normalized.category = category || "general"
+                return normalized
+              })
+              console.log(`Successfully fetched ${articles.length} articles from NewsData`)
             }
-          } catch (error) {
-            console.error(`Error fetching from NewsAPI: ${error instanceof Error ? error.message : String(error)}`)
+          } else {
+            console.error(`NewsData responded with status: ${response.status}`)
           }
+        } catch (error) {
+          console.error(`Error fetching from NewsData: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
     }
@@ -426,16 +416,20 @@ export async function fetchTopHeadlines(category?: string, country = "us", pageS
       return articles
     }
 
-    // If both APIs failed or returned no results, use fallback data
-    console.log(`No articles fetched from APIs, using fallback data for category: ${category || "general"}`)
-    return fallbackData
+    // If all APIs failed, use mock data
+    console.log(`All APIs failed, using mock data for category: ${category || "general"}`)
+    const mockData = getMockArticles(category, pageSize)
+    cacheResponse(cacheKey, mockData)
+    return mockData
   } catch (error) {
     console.error(`Error fetching top headlines: ${error instanceof Error ? error.message : String(error)}`)
-    return fallbackData
+    const mockData = getMockArticles(category, pageSize)
+    cacheResponse(cacheKey, mockData)
+    return mockData
   }
 }
 
-// Search articles with failover between APIs
+// Search articles with enhanced fallback
 export async function searchArticles(query: string, pageSize = 20): Promise<Article[]> {
   // Try to get from cache first
   const cacheKey = `search-${query}-${pageSize}`
@@ -445,21 +439,19 @@ export async function searchArticles(query: string, pageSize = 20): Promise<Arti
   }
 
   // Get fallback data ready in case of failure
-  const fallbackData = fallbackArticles
-    .filter(
-      (article) =>
-        article.title.toLowerCase().includes(query.toLowerCase()) ||
-        article.description.toLowerCase().includes(query.toLowerCase()),
-    )
-    .slice(0, pageSize)
+  const fallbackData = getMockArticles("general", pageSize).map((article) => ({
+    ...article,
+    title: `${query} - ${article.title}`,
+    description: `Search result for "${query}": ${article.description}`,
+  }))
 
   try {
     // Try to get results from Oxylabs first
     try {
-      const oxylabsResults = await searchOxylabsNews(query, pageSize)
+      const oxylabsResults = await searchOxylabsNews(query, Math.min(pageSize, 10))
 
       if (oxylabsResults.length > 0) {
-        // Cache the results
+        console.log(`Found ${oxylabsResults.length} articles from Oxylabs`)
         cacheResponse(cacheKey, oxylabsResults)
         return oxylabsResults
       }
@@ -467,28 +459,27 @@ export async function searchArticles(query: string, pageSize = 20): Promise<Arti
       console.error(`Error searching with Oxylabs: ${error instanceof Error ? error.message : String(error)}`)
     }
 
-    // If Oxylabs fails or returns no results, fall back to other APIs
-    // Get the best available API source
-    let source = getActiveSource()
+    // If Oxylabs fails, try other APIs
+    const source = getActiveSource()
     if (!source) {
-      console.error("No active API source available")
+      console.log("No active API source available for search, using mock data")
+      cacheResponse(cacheKey, fallbackData)
       return fallbackData
     }
 
     let articles: Article[] = []
-    let apiSourceId = source.id
 
-    // Try the first API
+    // Try NewsAPI search
     if (source.id === "newsapi") {
-      const params = new URLSearchParams({
-        q: query,
-        pageSize: pageSize.toString(),
-        apiKey: source.apiKey as string,
-      })
-
       try {
+        const params = new URLSearchParams({
+          q: query,
+          pageSize: Math.min(pageSize, 20).toString(),
+          apiKey: source.apiKey as string,
+        })
+
         const response = await fetchWithRetry(`${source.baseUrl}${source.endpoints.everything}?${params.toString()}`, {
-          next: { revalidate: 3600 }, // Cache for 1 hour
+          next: { revalidate: 3600 },
         })
 
         if (response.ok) {
@@ -497,111 +488,45 @@ export async function searchArticles(query: string, pageSize = 20): Promise<Arti
 
           if (data.articles && data.articles.length > 0) {
             articles = data.articles.map((article) => normalizeArticle(article, source.name, "newsapi"))
+            console.log(`Found ${articles.length} articles from NewsAPI search`)
           }
         } else {
-          console.error(`NewsAPI search responded with status: ${response.status}, trying fallback source`)
+          console.error(`NewsAPI search responded with status: ${response.status}`)
         }
       } catch (error) {
         console.error(`Error searching with NewsAPI: ${error instanceof Error ? error.message : String(error)}`)
       }
+    }
 
-      // If first API fails or returns no results, try the second one
-      if (articles.length === 0) {
-        const fallbackSource = NEWS_SOURCES.find((s) => s.id === "newsdata")
-        if (fallbackSource && fallbackSource.active && fallbackSource.apiKey) {
-          source = fallbackSource
-          apiSourceId = "newsdata"
-
+    // If NewsAPI search failed, try NewsData.io
+    if (articles.length === 0) {
+      const fallbackSource = NEWS_SOURCES.find((s) => s.id === "newsdata" && s.active)
+      if (fallbackSource && fallbackSource.apiKey) {
+        try {
           const params = new URLSearchParams({
-            apikey: source.apiKey as string,
+            apikey: fallbackSource.apiKey as string,
             q: query,
-            size: pageSize.toString(),
+            size: Math.min(pageSize, 10).toString(),
           })
 
-          try {
-            const response = await fetchWithRetry(
-              `${source.baseUrl}${source.endpoints.everything}?${params.toString()}`,
-              {
-                next: { revalidate: 3600 }, // Cache for 1 hour
-              },
-            )
+          const response = await fetchWithRetry(
+            `${fallbackSource.baseUrl}${fallbackSource.endpoints.everything}?${params.toString()}`,
+            { next: { revalidate: 3600 } },
+          )
 
-            if (response.ok) {
-              const data = await response.json()
-              updateApiUsage(source.id)
+          if (response.ok) {
+            const data = await response.json()
+            updateApiUsage(fallbackSource.id)
 
-              if (data.results && data.results.length > 0) {
-                articles = data.results.map((article: any) => normalizeArticle(article, source.name, "newsdata"))
-              }
-            } else {
-              console.error(`NewsData search responded with status: ${response.status}, using fallback data`)
+            if (data.results && data.results.length > 0) {
+              articles = data.results.map((article: any) => normalizeArticle(article, fallbackSource.name, "newsdata"))
+              console.log(`Found ${articles.length} articles from NewsData search`)
             }
-          } catch (error) {
-            console.error(`Error searching with NewsData: ${error instanceof Error ? error.message : String(error)}`)
+          } else {
+            console.error(`NewsData search responded with status: ${response.status}`)
           }
-        }
-      }
-    } else if (source.id === "newsdata") {
-      // Start with NewsData.io
-      const params = new URLSearchParams({
-        apikey: source.apiKey as string,
-        q: query,
-        size: pageSize.toString(),
-      })
-
-      try {
-        const response = await fetchWithRetry(`${source.baseUrl}${source.endpoints.everything}?${params.toString()}`, {
-          next: { revalidate: 3600 }, // Cache for 1 hour
-        })
-
-        if (response.ok) {
-          const data = await response.json()
-          updateApiUsage(source.id)
-
-          if (data.results && data.results.length > 0) {
-            articles = data.results.map((article: any) => normalizeArticle(article, source.name, "newsdata"))
-          }
-        } else {
-          console.error(`NewsData search responded with status: ${response.status}, trying fallback source`)
-        }
-      } catch (error) {
-        console.error(`Error searching with NewsData: ${error instanceof Error ? error.message : String(error)}`)
-      }
-
-      // If first API fails or returns no results, try the second one
-      if (articles.length === 0) {
-        const fallbackSource = NEWS_SOURCES.find((s) => s.id === "newsapi")
-        if (fallbackSource && fallbackSource.active && fallbackSource.apiKey) {
-          source = fallbackSource
-          apiSourceId = "newsapi"
-
-          const params = new URLSearchParams({
-            q: query,
-            pageSize: pageSize.toString(),
-            apiKey: source.apiKey as string,
-          })
-
-          try {
-            const response = await fetchWithRetry(
-              `${source.baseUrl}${source.endpoints.everything}?${params.toString()}`,
-              {
-                next: { revalidate: 3600 }, // Cache for 1 hour
-              },
-            )
-
-            if (response.ok) {
-              const data: NewsApiResponse = await response.json()
-              updateApiUsage(source.id)
-
-              if (data.articles && data.articles.length > 0) {
-                articles = data.articles.map((article) => normalizeArticle(article, source.name, "newsapi"))
-              }
-            } else {
-              console.error(`NewsAPI search responded with status: ${response.status}, using fallback data`)
-            }
-          } catch (error) {
-            console.error(`Error searching with NewsAPI: ${error instanceof Error ? error.message : String(error)}`)
-          }
+        } catch (error) {
+          console.error(`Error searching with NewsData: ${error instanceof Error ? error.message : String(error)}`)
         }
       }
     }
@@ -612,10 +537,13 @@ export async function searchArticles(query: string, pageSize = 20): Promise<Arti
       return articles
     }
 
-    // If both APIs failed or returned no results, use fallback data
+    // If all searches failed, use mock data
+    console.log("All search APIs failed, using mock data")
+    cacheResponse(cacheKey, fallbackData)
     return fallbackData
   } catch (error) {
     console.error(`Error searching articles: ${error instanceof Error ? error.message : String(error)}`)
+    cacheResponse(cacheKey, fallbackData)
     return fallbackData
   }
 }
@@ -629,5 +557,17 @@ export function getApiUsageStats(): Record<string, ApiUsage> {
 export function clearCache(): void {
   Object.keys(apiCache).forEach((key) => {
     delete apiCache[key]
+  })
+}
+
+// Reset API source status (for testing)
+export function resetApiSources(): void {
+  NEWS_SOURCES.forEach((source) => {
+    source.active = true
+    apiUsage[source.id] = {
+      remainingCalls: source.dailyLimit,
+      resetTime: new Date().setHours(24, 0, 0, 0),
+      lastUpdated: Date.now(),
+    }
   })
 }

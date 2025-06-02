@@ -30,6 +30,21 @@ export default function NewsCard({ article, className, showCategory = true, prio
     shouldUsePexels && (!article.imageUrl || imageError),
   )
 
+  // Create a safe article ID for routing
+  const getSafeArticleId = () => {
+    if (!article.id) {
+      return encodeURIComponent(article.url || article.title || "unknown")
+    }
+
+    // If the ID is already a URL, encode it properly
+    if (article.id.startsWith("http")) {
+      return encodeURIComponent(article.id)
+    }
+
+    // For other IDs, use them as-is but ensure they're URL safe
+    return encodeURIComponent(article.id)
+  }
+
   // Determine the image source
   const getImageSrc = () => {
     // If we have a valid original image and no error, use it
@@ -54,12 +69,20 @@ export default function NewsCard({ article, className, showCategory = true, prio
 
   const imageSrc = getImageSrc()
   const isFeatureCard = className?.includes("md:col-span-2") || className?.includes("lg:col-span-3")
+  const articleId = getSafeArticleId()
 
   return (
     <div
       className={cn("group relative overflow-hidden rounded-xl transition-all duration-300 hover:shadow-lg", className)}
     >
-      <Link href={`/article/${encodeURIComponent(article.id)}`} className="block">
+      <Link
+        href={`/article/${articleId}`}
+        className="block"
+        onClick={(e) => {
+          // Add some debugging
+          console.log("Navigating to article:", articleId, article)
+        }}
+      >
         <div className="relative aspect-video w-full overflow-hidden rounded-xl">
           {loading ? (
             <div className="w-full h-full bg-gray-200 dark:bg-gray-800 animate-pulse flex items-center justify-center">
