@@ -2,7 +2,6 @@
 
 import Image from "next/image"
 import Link from "next/link"
-import { notFound } from "next/navigation"
 import { fetchTopHeadlines, searchArticles } from "@/lib/api-service"
 import { formatDistanceToNow } from "date-fns"
 import SaveArticleButton from "@/components/save-article-button"
@@ -12,6 +11,7 @@ import BackButton from "@/components/back-button"
 import { ExternalLink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
+// Force dynamic rendering to avoid build-time issues
 export const dynamic = "force-dynamic"
 export const revalidate = 0
 
@@ -62,10 +62,10 @@ async function getArticleById(id: string) {
     const decodedId = decodeURIComponent(id)
     console.log(`Fetching article with ID: ${decodedId}`)
 
-    // Check if this is a URL (like the BBC URL in the error)
+    // Check if this is a URL
     const isUrl = decodedId.startsWith("http")
 
-    // First check if this is a saved article
+    // First check if this is a saved article (with error handling)
     try {
       const savedArticle = await getSavedArticleById(decodedId)
       if (savedArticle) {
@@ -74,12 +74,13 @@ async function getArticleById(id: string) {
       }
     } catch (error) {
       console.warn("Error checking saved articles:", error)
+      // Continue with other methods
     }
 
-    // Try to find in top headlines with reduced page size to avoid rate limits
+    // Try to find in top headlines (with reduced size and error handling)
     try {
-      console.log("Fetching top headlines with reduced size...")
-      const topHeadlines = await fetchTopHeadlines(undefined, "us", 20) // Reduced from 50
+      console.log("Fetching top headlines...")
+      const topHeadlines = await fetchTopHeadlines(undefined, "us", 15)
       const article = topHeadlines.find(
         (article) =>
           article.id === decodedId ||
@@ -94,6 +95,7 @@ async function getArticleById(id: string) {
       }
     } catch (error) {
       console.warn("Error fetching top headlines:", error)
+      // Continue with other methods
     }
 
     // If it's a URL and we haven't found it, create a mock article
@@ -102,23 +104,21 @@ async function getArticleById(id: string) {
       return createMockArticleFromUrl(decodedId)
     }
 
-    // Try searching with a simplified approach
+    // Try searching (with error handling)
     try {
       let searchTerm = ""
 
       if (decodedId.includes("http")) {
-        // If it's a URL, extract meaningful parts
         const url = new URL(decodedId)
         const pathParts = url.pathname.split("/").filter(Boolean)
         searchTerm = pathParts[pathParts.length - 1]?.replace(/[-_]/g, " ") || url.hostname
       } else {
-        // Use the ID as search term
         searchTerm = decodedId.replace(/[^a-zA-Z0-9\s]/g, " ").trim()
       }
 
       if (searchTerm && searchTerm.length > 2) {
         console.log(`Searching for article with term: ${searchTerm}`)
-        const searchResults = await searchArticles(searchTerm, 10) // Reduced from 20
+        const searchResults = await searchArticles(searchTerm, 8)
         const article = searchResults.find(
           (article) => article.id === decodedId || article.url === decodedId || encodeURIComponent(article.id) === id,
         )
@@ -130,25 +130,49 @@ async function getArticleById(id: string) {
       }
     } catch (error) {
       console.warn("Error searching for article:", error)
+      // Continue to fallback
     }
 
-    console.log("Article not found, returning null")
-    return null
+    // Final fallback: create a generic mock article
+    console.log("Creating fallback mock article")
+    return {
+      id: decodedId,
+      title: "News Article",
+      description: "This article is not currently available. Please try again later or visit the original source.",
+      content:
+        "The article content is not available at this time. Please check back later or visit the original news source.",
+      url: isUrl ? decodedId : "#",
+      imageUrl: "/placeholder.svg?height=400&width=600",
+      publishedAt: new Date().toISOString(),
+      source: "News Source",
+      category: "general",
+    }
   } catch (error) {
     console.error("Error in getArticleById:", error)
-    // If there's an error and it's a URL, try to create a mock article
+    // Return a fallback article instead of throwing
     const decodedId = decodeURIComponent(id)
     if (decodedId.startsWith("http")) {
       return createMockArticleFromUrl(decodedId)
     }
-    throw new Error(`Failed to fetch article: ${error instanceof Error ? error.message : "Unknown error"}`)
+
+    return {
+      id: decodedId,
+      title: "Article Not Available",
+      description: "This article could not be loaded. Please try again later.",
+      content:
+        "The article content is temporarily unavailable. Please try refreshing the page or visit the original source.",
+      url: "#",
+      imageUrl: "/placeholder.svg?height=400&width=600",
+      publishedAt: new Date().toISOString(),
+      source: "News Source",
+      category: "general",
+    }
   }
 }
 
 async function getRelatedArticles(category: string) {
   try {
     console.log(`Fetching related articles for category: ${category}`)
-    // Use a smaller number to avoid rate limits
     const articles = await fetchTopHeadlines(category, "us", 6)
     console.log(`Found ${articles.length} related articles`)
     return articles
@@ -160,14 +184,18 @@ async function getRelatedArticles(category: string) {
 
 export default async function ArticlePage({ params }: ArticlePageProps) {
   try {
+    // Always get an article (never null due to fallbacks)
     const article = await getArticleById(params.id)
 
-    if (!article) {
-      notFound()
+    // Get related articles with error handling
+    let relatedArticles: any[] = []
+    try {
+      relatedArticles = await getRelatedArticles(article.category)
+    } catch (error) {
+      console.warn("Failed to fetch related articles:", error)
     }
 
     const formattedDate = formatDistanceToNow(new Date(article.publishedAt), { addSuffix: true })
-    const relatedArticles = await getRelatedArticles(article.category)
 
     // Process article content for better display
     const processedContent = article.content
@@ -180,7 +208,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
     return (
       <div className="max-w-4xl mx-auto p-4">
         <div className="mb-4">
-          <BackButton fallbackPath={`/category/${article.category}`} />
+          <BackButton fallbackPath="/" />
         </div>
 
         <div className="mb-8">
@@ -229,7 +257,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
               <p className="mb-4 text-muted-foreground">Full article content is available at the source link below.</p>
             )}
 
-            {article.url && (
+            {article.url && article.url !== "#" && (
               <div className="mt-8 p-4 bg-muted rounded-md">
                 <p className="font-medium mb-2">Read the full article:</p>
                 <Button asChild variant="outline" className="w-full">
@@ -265,20 +293,22 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
       </div>
     )
   } catch (error) {
-    console.error("Error in ArticlePage:", error)
+    console.error("Critical error in ArticlePage:", error)
+
+    // Return a safe fallback page instead of crashing
     return (
       <div className="max-w-4xl mx-auto p-4">
-        <div className="bg-destructive/10 border border-destructive rounded-md p-4">
-          <h2 className="text-lg font-semibold text-destructive mb-2">Error Loading Article</h2>
-          <p className="text-muted-foreground">
-            We encountered an error while loading this article. Please try again or return to the home page.
+        <div className="bg-destructive/10 border border-destructive rounded-md p-6">
+          <h1 className="text-xl font-semibold text-destructive mb-2">Article Unavailable</h1>
+          <p className="text-muted-foreground mb-4">
+            We're experiencing technical difficulties loading this article. Please try again later.
           </p>
-          <div className="mt-4 flex gap-2">
+          <div className="flex gap-2">
             <Button asChild variant="outline" size="sm">
-              <Link href="/">Go Home</Link>
+              <Link href="/">Return Home</Link>
             </Button>
             <Button onClick={() => window.location.reload()} variant="outline" size="sm">
-              Try Again
+              Retry
             </Button>
           </div>
         </div>
