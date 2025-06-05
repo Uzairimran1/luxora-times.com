@@ -75,7 +75,14 @@ export default function NewsCard({ article, className, showCategory = true, prio
     <div
       className={cn("group relative overflow-hidden rounded-xl transition-all duration-300 hover:shadow-lg", className)}
     >
-      <Link href={`/article/${articleId}`} className="block" prefetch={true}>
+      <Link
+        href={`/article/${articleId}`}
+        className="block"
+        onClick={(e) => {
+          // Add some debugging
+          console.log("Navigating to article:", articleId, article)
+        }}
+      >
         <div className="relative aspect-video w-full overflow-hidden rounded-xl">
           {loading ? (
             <div className="w-full h-full bg-gray-200 dark:bg-gray-800 animate-pulse flex items-center justify-center">
