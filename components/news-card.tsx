@@ -8,27 +8,36 @@ import { formatDistanceToNow } from "date-fns"
 import SaveArticleButton from "./save-article-button"
 import { cn } from "@/lib/utils"
 import { usePexelsMedia } from "@/hooks/use-pexels-media"
-import type { PexelsPhoto } from "@/lib/pexels-service"
+import type { PexelsPhoto, PexelsVideo } from "@/lib/pexels-service"
+import { Play, Camera, RefreshCw } from "lucide-react"
 
 interface NewsCardProps {
   article: Article
   className?: string
   showCategory?: boolean
   priority?: boolean
+  preferVideo?: boolean
 }
 
-export default function NewsCard({ article, className, showCategory = true, priority = false }: NewsCardProps) {
+export default function NewsCard({
+  article,
+  className,
+  showCategory = true,
+  priority = false,
+  preferVideo = false,
+}: NewsCardProps) {
   const [imageError, setImageError] = useState(false)
   const [shouldUsePexels, setShouldUsePexels] = useState(false)
 
   const formattedDate = formatDistanceToNow(new Date(article.publishedAt), { addSuffix: true })
 
-  // Only fetch from Pexels if original image failed and we don't have a valid imageUrl
-  const { media, loading } = usePexelsMedia(
-    article.title,
-    article.category,
-    shouldUsePexels && (!article.imageUrl || imageError),
-  )
+  // Enhanced Pexels integration with retry functionality
+  const { media, loading, error, retry, isRetrying } = usePexelsMedia(article.title, article.category, {
+    enabled: shouldUsePexels && (!article.imageUrl || imageError),
+    preferVideo,
+    retryCount: 2,
+    retryDelay: 1000,
+  })
 
   // Create a safe article ID for routing
   const getSafeArticleId = () => {
@@ -36,19 +45,17 @@ export default function NewsCard({ article, className, showCategory = true, prio
       return encodeURIComponent(article.url || article.title || "unknown")
     }
 
-    // If the ID is already a URL, encode it properly
     if (article.id.startsWith("http")) {
       return encodeURIComponent(article.id)
     }
 
-    // For other IDs, use them as-is but ensure they're URL safe
     return encodeURIComponent(article.id)
   }
 
-  // Determine the image source
+  // Enhanced image source determination
   const getImageSrc = () => {
     // If we have a valid original image and no error, use it
-    if (article.imageUrl && !imageError) {
+    if (article.imageUrl && !imageError && !article.imageUrl.includes("placeholder")) {
       return article.imageUrl
     }
 
@@ -58,11 +65,17 @@ export default function NewsCard({ article, className, showCategory = true, prio
       return pexelsPhoto.src.large
     }
 
+    if (media.type === "video" && media.data) {
+      const pexelsVideo = media.data as PexelsVideo
+      return pexelsVideo.image
+    }
+
     // Fallback to placeholder
     return `/placeholder.svg?height=400&width=600&text=${encodeURIComponent(article.title.substring(0, 20))}`
   }
 
   const handleImageError = () => {
+    console.log("Image error, switching to Pexels for:", article.title)
     setImageError(true)
     setShouldUsePexels(true)
   }
@@ -71,38 +84,50 @@ export default function NewsCard({ article, className, showCategory = true, prio
   const isFeatureCard = className?.includes("md:col-span-2") || className?.includes("lg:col-span-3")
   const articleId = getSafeArticleId()
 
+  // Check if we're using Pexels media
+  const isUsingPexels = media.type && media.data
+  const isVideo = media.type === "video"
+
   return (
     <div
       className={cn("group relative overflow-hidden rounded-xl transition-all duration-300 hover:shadow-lg", className)}
     >
-      <Link
-        href={`/article/${articleId}`}
-        className="block"
-        onClick={(e) => {
-          // Add some debugging
-          console.log("Navigating to article:", articleId, article)
-        }}
-      >
+      <Link href={`/article/${articleId}`} className="block">
         <div className="relative aspect-video w-full overflow-hidden rounded-xl">
           {loading ? (
             <div className="w-full h-full bg-gray-200 dark:bg-gray-800 animate-pulse flex items-center justify-center">
-              <span className="text-gray-500 text-sm">Loading image...</span>
+              <div className="flex flex-col items-center gap-2">
+                <RefreshCw className="w-6 h-6 animate-spin text-gray-500" />
+                <span className="text-gray-500 text-sm">Loading enhanced image...</span>
+              </div>
             </div>
           ) : (
-            <Image
-              src={imageSrc || "/placeholder.svg"}
-              alt={article.title}
-              fill
-              className="object-cover transition-transform duration-500 group-hover:scale-105"
-              sizes={
-                isFeatureCard
-                  ? "(max-width: 768px) 100vw, 100vw"
-                  : "(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-              }
-              onError={handleImageError}
-              priority={priority}
-            />
+            <>
+              <Image
+                src={imageSrc || "/placeholder.svg"}
+                alt={article.title}
+                fill
+                className="object-cover transition-transform duration-500 group-hover:scale-105"
+                sizes={
+                  isFeatureCard
+                    ? "(max-width: 768px) 100vw, 100vw"
+                    : "(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                }
+                onError={handleImageError}
+                priority={priority}
+              />
+
+              {/* Video indicator */}
+              {isVideo && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="bg-black/50 rounded-full p-3 backdrop-blur-sm">
+                    <Play className="w-8 h-8 text-white fill-white" />
+                  </div>
+                </div>
+              )}
+            </>
           )}
+
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
 
           {showCategory && (
@@ -113,12 +138,32 @@ export default function NewsCard({ article, className, showCategory = true, prio
             </div>
           )}
 
-          {/* Pexels attribution */}
-          {media.type === "photo" && media.data && (
+          {/* Enhanced Pexels attribution */}
+          {isUsingPexels && (
             <div className="absolute bottom-1 left-1 z-10">
-              <span className="text-xs text-white/60 bg-black/30 px-1 rounded">
-                Photo by {(media.data as PexelsPhoto).photographer}
-              </span>
+              <div className="flex items-center gap-1 text-xs text-white/80 bg-black/40 px-2 py-1 rounded backdrop-blur-sm">
+                {isVideo ? <Play className="w-3 h-3" /> : <Camera className="w-3 h-3" />}
+                <span>
+                  {media.type === "photo"
+                    ? `Photo by ${(media.data as PexelsPhoto).photographer}`
+                    : `Video by ${(media.data as PexelsVideo).user.name}`}
+                </span>
+              </div>
+            </div>
+          )}
+
+          {/* Error state with retry option */}
+          {error && !loading && (
+            <div className="absolute bottom-1 right-1 z-10">
+              <button
+                onClick={(e) => {
+                  e.preventDefault()
+                  retry()
+                }}
+                className="text-xs text-white/80 bg-red-500/40 px-2 py-1 rounded backdrop-blur-sm hover:bg-red-500/60 transition-colors"
+              >
+                Retry Image
+              </button>
             </div>
           )}
 
@@ -133,6 +178,12 @@ export default function NewsCard({ article, className, showCategory = true, prio
               <span>
                 {article.source} • {formattedDate}
               </span>
+              {isRetrying && (
+                <span className="flex items-center gap-1">
+                  <RefreshCw className="w-3 h-3 animate-spin" />
+                  Retrying...
+                </span>
+              )}
             </div>
           </div>
         </div>

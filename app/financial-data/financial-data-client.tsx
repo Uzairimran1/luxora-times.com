@@ -2,9 +2,11 @@
 
 import SimpleTradingViewChart from "@/components/simple-tradingview-chart"
 import SimpleMarketData from "@/components/simple-market-data"
+import TradingViewTimelineWidget from "@/components/tradingview-timeline-widget"
+import TradingViewMarketOverview from "@/components/tradingview-market-overview"
 import FinancialTicker from "@/components/financial-ticker"
 import Link from "next/link"
-import { ArrowLeft, TrendingUp, BarChart3, PieChart, Smartphone } from "lucide-react"
+import { ArrowLeft, TrendingUp, BarChart3, PieChart, Smartphone, Clock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { ErrorBoundary } from "@/components/error-boundary"
@@ -30,6 +32,7 @@ function WidgetErrorFallback({ error, resetErrorBoundary }: { error?: Error; res
 
 export default function FinancialDataClient() {
   const isMobile = typeof window !== "undefined" && window.innerWidth < 768
+  const isTablet = typeof window !== "undefined" && window.innerWidth >= 768 && window.innerWidth < 1024
 
   return (
     <main className="container mx-auto px-2 md:px-4 py-4 md:py-8">
@@ -37,7 +40,7 @@ export default function FinancialDataClient() {
         <div>
           <h1 className="text-2xl md:text-4xl font-bold mb-2">Financial Data Dashboard</h1>
           <p className="text-sm md:text-base text-muted-foreground">
-            Comprehensive financial market data powered by TradingView
+            Comprehensive financial market data powered by TradingView with enhanced visibility
           </p>
         </div>
         <Link href="/" className="mt-4 md:mt-0">
@@ -51,7 +54,7 @@ export default function FinancialDataClient() {
       {/* Financial Ticker */}
       <ErrorBoundary fallback={WidgetErrorFallback}>
         <div className="mb-6 md:mb-8">
-          <FinancialTicker height={isMobile ? 50 : 60} />
+          <FinancialTicker height={isMobile ? 60 : 80} />
         </div>
       </ErrorBoundary>
 
@@ -61,9 +64,10 @@ export default function FinancialDataClient() {
           <Smartphone className="h-4 w-4" />
           <AlertDescription>
             <div className="space-y-2">
-              <p className="font-medium">Mobile Optimized View</p>
+              <p className="font-medium">Enhanced Mobile View</p>
               <p className="text-sm">
-                Financial widgets have been optimized for mobile viewing. Charts may take a moment to load.
+                Financial widgets have been optimized with larger dimensions for better mobile viewing. Charts may take
+                a moment to load.
               </p>
             </div>
           </AlertDescription>
@@ -76,26 +80,30 @@ export default function FinancialDataClient() {
           <div className="space-y-2">
             <p className="font-medium">Enhanced Financial Dashboard</p>
             <p className="text-sm">
-              Real-time market data and interactive charts. Use the tabs below to navigate between different financial
-              tools.
+              Real-time market data with enhanced visibility and larger widget dimensions for improved readability and
+              user engagement. Use the tabs below to navigate between different financial tools.
             </p>
           </div>
         </AlertDescription>
       </Alert>
 
       <Tabs defaultValue="chart" className="mb-8">
-        <TabsList className={`grid w-full ${isMobile ? "grid-cols-2" : "grid-cols-3"} mb-6`}>
+        <TabsList className={`grid w-full ${isMobile ? "grid-cols-2" : "grid-cols-4"} mb-6`}>
           <TabsTrigger value="chart" className="flex items-center gap-1 text-xs md:text-sm">
             <BarChart3 className="h-3 w-3 md:h-4 md:w-4" />
             Chart
+          </TabsTrigger>
+          <TabsTrigger value="market-overview" className="flex items-center gap-1 text-xs md:text-sm">
+            <PieChart className="h-3 w-3 md:h-4 md:w-4" />
+            Market Overview
           </TabsTrigger>
           <TabsTrigger value="market-data" className="flex items-center gap-1 text-xs md:text-sm">
             <TrendingUp className="h-3 w-3 md:h-4 md:w-4" />
             Market Data
           </TabsTrigger>
-          <TabsTrigger value="overview" className="flex items-center gap-1 text-xs md:text-sm">
-            <PieChart className="h-3 w-3 md:h-4 md:w-4" />
-            Overview
+          <TabsTrigger value="timeline" className="flex items-center gap-1 text-xs md:text-sm">
+            <Clock className="h-3 w-3 md:h-4 md:w-4" />
+            Timeline
           </TabsTrigger>
         </TabsList>
 
@@ -107,13 +115,36 @@ export default function FinancialDataClient() {
                 Advanced Trading Chart
               </CardTitle>
               <CardDescription className="text-sm">
-                Interactive chart with technical analysis tools and symbol search
+                Interactive chart with enhanced dimensions, technical analysis tools and symbol search
               </CardDescription>
             </CardHeader>
           </Card>
           <ErrorBoundary fallback={WidgetErrorFallback}>
-            <div className="min-h-[400px] md:min-h-[600px]">
-              <SimpleTradingViewChart height={isMobile ? "400px" : "600px"} />
+            <div className="min-h-[500px] md:min-h-[800px]">
+              <SimpleTradingViewChart height={isMobile ? "500px" : isTablet ? "700px" : "800px"} />
+            </div>
+          </ErrorBoundary>
+        </TabsContent>
+
+        <TabsContent value="market-overview">
+          <Card className="mb-6">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
+                <PieChart className="h-5 w-5" />
+                Market Overview
+              </CardTitle>
+              <CardDescription className="text-sm">
+                Enhanced comprehensive overview with indices, forex, futures, and bonds data
+              </CardDescription>
+            </CardHeader>
+          </Card>
+          <ErrorBoundary fallback={WidgetErrorFallback}>
+            <div className="min-h-[600px] md:min-h-[700px]">
+              <TradingViewMarketOverview
+                height={isMobile ? 500 : isTablet ? 600 : 700}
+                width="100%"
+                allowFullscreen={true}
+              />
             </div>
           </ErrorBoundary>
         </TabsContent>
@@ -125,36 +156,45 @@ export default function FinancialDataClient() {
                 <TrendingUp className="h-5 w-5" />
                 Market Data
               </CardTitle>
-              <CardDescription className="text-sm">Real-time quotes for major markets and instruments</CardDescription>
+              <CardDescription className="text-sm">
+                Enhanced real-time quotes for major markets and instruments
+              </CardDescription>
             </CardHeader>
           </Card>
           <ErrorBoundary fallback={WidgetErrorFallback}>
-            <SimpleMarketData />
+            <div className="min-h-[600px]">
+              <SimpleMarketData />
+            </div>
           </ErrorBoundary>
         </TabsContent>
 
-        <TabsContent value="overview">
+        <TabsContent value="timeline">
           <Card className="mb-6">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-lg md:text-xl">
-                <PieChart className="h-5 w-5" />
-                Market Overview
+                <Clock className="h-5 w-5" />
+                Financial News Timeline
               </CardTitle>
-              <CardDescription className="text-sm">Comprehensive overview of global financial markets</CardDescription>
+              <CardDescription className="text-sm">
+                Enhanced real-time financial news and market events with improved visibility
+              </CardDescription>
             </CardHeader>
           </Card>
           <ErrorBoundary fallback={WidgetErrorFallback}>
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <SimpleTradingViewChart height="400px" symbol="NASDAQ:AAPL" />
-              <SimpleMarketData />
+            <div className="min-h-[600px] md:min-h-[700px]">
+              <TradingViewTimelineWidget
+                height={isMobile ? 500 : isTablet ? 600 : 700}
+                width="100%"
+                allowFullscreen={true}
+              />
             </div>
           </ErrorBoundary>
         </TabsContent>
       </Tabs>
 
       <div className="text-center text-xs md:text-sm text-muted-foreground space-y-2">
-        <p>Financial data provided by TradingView. Data may be delayed.</p>
-        <p>Charts and market data update in real-time.</p>
+        <p>Financial data provided by TradingView with enhanced visibility. Data may be delayed.</p>
+        <p>Charts, market overview, market data, and news timeline update in real-time.</p>
       </div>
     </main>
   )
